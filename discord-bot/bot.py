@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 import os
 import aiohttp
 from openai import OpenAI
@@ -22,26 +23,32 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 intents = discord.Intents.default()
 intents.message_content = True
 
-client_discord = discord.Client(intents=intents)
+# discord.py 2.0以降ではcommands.Botを使用
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-@client_discord.event
+@bot.event
 async def on_ready():
     """Botがログインしたときに実行される処理"""
-    print(f'{client_discord.user} としてログインしました。')
+    print(f'{bot.user} としてログインしました。')
     print(f'Obsidianの保存先: {OBSIDIAN_VAULT_FOLDER_PATH}')
     print('---------------------------------')
     print('ボイスメモの投稿を待っています...')
 
-@client_discord.event
+@bot.event
 async def on_message(message):
     """メッセージが投稿されたときに実行される処理"""
     # Bot自身のメッセージは無視する
-    if message.author == client_discord.user:
+    if message.author == bot.user:
         return
 
     # テキストメッセージに反応する機能を追加（デバッグ用）
     if message.content.lower() == "ping":
         await message.reply("pong! Botは正常に動作しています。")
+        return
+    
+    # 再生成コマンド
+    if message.content.lower() == "再生成":
+        await handle_regenerate_command(message)
         return
     
     # デバッグコマンド：既存ノート一覧表示
@@ -65,7 +72,7 @@ async def on_message(message):
             print(f"添付ファイル{i}: {attachment.filename}, タイプ: {attachment.content_type}")
     
     # テキストメッセージの処理（音声メッセージ以外）
-    if message.content and not message.attachments and message.content.lower() != "ping":
+    if message.content and not message.attachments and message.content.lower() not in ["ping", "再生成", "debug"]:
         try:
             await message.reply("📝 テキストメモを処理中です...")
             
@@ -81,18 +88,26 @@ async def on_message(message):
             # 関連性分析
             related_notes = await find_related_notes(raw_text, existing_notes)
 
-            # Obsidianに保存（関連ノートも含める）
-            saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes)
+            # SNS投稿用変換
+            sns_post = await convert_to_sns_post(summarized_text)
 
-            # 結果をDiscordに返信
-            reply_text = f"✅ テキスト要約・関連性分析が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
+            # Obsidianに保存（関連ノートも含める）
+            saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes, sns_post)
+
+            # 結果をDiscordに返信（シンプルなテキスト形式）
+            reply_text = f"✅ テキスト要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
             
             if related_notes:
                 reply_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}\n\n"
             
+            reply_text += f"📱 **SNS投稿用**:\n```\n{sns_post}\n```\n\n"
             reply_text += f"**元のテキスト:**\n```\n{raw_text}\n```\n\n**AIによる要約・整形:**\n```\n{summarized_text}\n```"
             
+            # SNS投稿ガイドを追加
+            sns_guide = create_sns_guide(sns_post, saved_filename)
+            
             await message.reply(reply_text)
+            await message.reply(sns_guide)
             
         except Exception as e:
             print(f"テキスト処理でエラーが発生しました: {e}")
@@ -130,18 +145,26 @@ async def on_message(message):
                         # 関連性分析
                         related_notes = await find_related_notes(raw_text, existing_notes)
 
-                        # Obsidianに保存（関連ノートも含める）
-                        saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes)
+                        # SNS投稿用変換
+                        sns_post = await convert_to_sns_post(summarized_text)
 
-                        # 結果をDiscordに返信
-                        reply_text = f"✅ 文字起こし・要約・関連性分析が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
+                        # Obsidianに保存（関連ノートも含める）
+                        saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes, sns_post)
+
+                        # 結果をDiscordに返信（シンプルなテキスト形式）
+                        reply_text = f"✅ 文字起こし・要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
                         
                         if related_notes:
                             reply_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}\n\n"
                         
+                        reply_text += f"📱 **SNS投稿用**:\n```\n{sns_post}\n```\n\n"
                         reply_text += f"**元の文字起こし:**\n```\n{raw_text}\n```\n\n**AIによる要約・整形:**\n```\n{summarized_text}\n```"
                         
+                        # SNS投稿ガイドを追加
+                        sns_guide = create_sns_guide(sns_post, saved_filename)
+                        
                         await message.reply(reply_text)
+                        await message.reply(sns_guide)
                     else:
                         await message.reply("❌ 音声ファイルのダウンロードに失敗しました。")
 
@@ -160,10 +183,16 @@ async def summarize_with_chatgpt(text):
                     "content": """あなたは音声メモの要約・整形を行うアシスタントです。
                     以下のルールで音声メモを処理してください：
                     
-                    1. 内容を3-5行程度で要約
-                    2. 重要なキーワードを箇条書きで抽出
-                    3. 関連する行動項目があれば「TODO」として記載
-                    4. Markdown形式で整理
+                    1. 結論から書く
+                    2. 抽象的な表現は避け、具体的に表現する
+                    3. 内容が濃い場合はPREP法（結論→理由→具体例→結論）を使う
+                    4. なるべく言い切りの表現を使う
+                    5. 同じ単語の繰り返しを避け、類義語や言い換えを積極的に使う
+                    6. 重要なキーワードを箇条書きで抽出
+                    7. 関連する行動項目があれば「TODO」として記載
+                    8. 上から目線ではなく、読み手を鼓舞するような表現を使う
+                    9. #記号は絶対に使わない（見出しには「◆」「▼」「★」などを使う）
+                    10. ハッシュタグ（#〇〇）は一切使用しない
                     
                     音声メモが短い場合は、そのまま整理された形で出力してください。"""
                 },
@@ -268,7 +297,49 @@ async def find_related_notes(new_content, existing_notes):
         print(f"関連性分析でエラー: {e}")
         return []
 
-def save_to_obsidian(raw_text, summarized_text=None, related_notes=None):
+async def convert_to_sns_post(content):
+    """メモ内容をSNS投稿用に変換する関数"""
+    try:
+        response = client_openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """あなたはSNS投稿作成の専門家です。
+                    音声メモや思考メモをTwitter投稿に最適化してください。
+                    
+                    ルール：
+                    1. 280文字以内で収める
+                    2. 結論から書く
+                    3. 抽象的な表現は避け、具体的に表現する
+                    4. 内容が濃い場合はPREP法（結論→理由→具体例→結論）を使う
+                    5. なるべく言い切りの表現を使う
+                    6. 同じ単語の繰り返しを避け、類義語や言い換えを積極的に使う
+                    7. 絵文字は全体で1-2個程度に抑える
+                    8. 上から目線ではなく、周りの人を鼓舞するような表現を使う
+                    9. #記号は絶対に使わない
+                    10. ハッシュタグ（#〇〇）は一切付けない
+                    11. 日本語で自然な表現にする
+                    
+                    投稿形式：
+                    [メイン文章のみ（#記号なし）]"""
+                },
+                {
+                    "role": "user",
+                    "content": f"以下の内容をTwitter投稿用に変換してください：\n\n{content}"
+                }
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"SNS変換でエラー: {e}")
+        return f"SNS変換に失敗しました。元の内容：\n{content[:100]}..."
+
+def save_to_obsidian(raw_text, summarized_text=None, related_notes=None, sns_post=None):
     """指定されたフォルダに、現在日時のファイル名でテキストを保存する関数"""
     try:
         # 現在の日時を取得
@@ -286,6 +357,10 @@ def save_to_obsidian(raw_text, summarized_text=None, related_notes=None):
         if summarized_text:
             content_to_save += f"## AI要約・整形\n\n{summarized_text}\n\n"
         
+        # SNS投稿用テキストを追加
+        if sns_post:
+            content_to_save += f"## SNS投稿用\n\n{sns_post}\n\n"
+        
         # 関連ノートのリンクを追加
         if related_notes:
             content_to_save += f"## 関連ノート\n\n"
@@ -302,6 +377,8 @@ def save_to_obsidian(raw_text, summarized_text=None, related_notes=None):
         
         if related_notes:
             print(f"関連ノートリンク追加: {related_notes}")
+        if sns_post:
+            print(f"SNS投稿用テキスト追加完了")
         
         return file_name
         
@@ -309,5 +386,64 @@ def save_to_obsidian(raw_text, summarized_text=None, related_notes=None):
         print(f"ファイルへの書き込み中にエラーが発生しました: {e}")
         return None
 
+def create_sns_guide(sns_post, filename):
+    """SNS投稿ガイドを作成する関数（シンプルなテキスト形式）"""
+    guide = f"""
+🎉 **SNS投稿ガイド**
+
+📱 **簡単3ステップでTwitter投稿！**
+
+**ステップ1**: 上記のSNS投稿用テキストをコピー
+　　　　　　 （テキストを長押しして選択→コピー）
+
+**ステップ2**: 下のリンクをタップしてTwitterを開く
+　　　　　　 👉 https://twitter.com/intent/tweet
+
+**ステップ3**: Twitterの投稿欄に貼り付けして投稿！
+
+🔄 **文章を変えたい場合**
+「再生成」と送信すると新しいSNS文章を作成します
+
+💡 **ヒント**: スマホならリンクをタップするだけでTwitterアプリが開きます
+"""
+    return guide
+
+async def handle_regenerate_command(message):
+    """SNS文章再生成コマンドを処理する関数"""
+    try:
+        await message.reply("🔄 SNS文章を再生成中です...")
+        
+        # 最新のファイルを取得
+        md_files = glob.glob(os.path.join(OBSIDIAN_VAULT_FOLDER_PATH, "*.md"))
+        if not md_files:
+            await message.reply("❌ 再生成するファイルが見つかりません。")
+            return
+        
+        # 最新のファイルを取得
+        latest_file = max(md_files, key=os.path.getmtime)
+        filename = os.path.basename(latest_file)
+        
+        with open(latest_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 元の文字起こし部分を抽出
+        if "## 元の文字起こし" in content:
+            original_text = content.split("## 元の文字起こし")[1].strip()
+        else:
+            original_text = content
+        
+        # SNS投稿用文章を再生成
+        new_sns_post = await convert_to_sns_post(original_text)
+        
+        # 結果を返信
+        reply_text = f"✅ **SNS文章を再生成しました！**\n\n📱 **新しいSNS投稿用**:\n```\n{new_sns_post}\n```"
+        sns_guide = create_sns_guide(new_sns_post, filename)
+        
+        await message.reply(reply_text)
+        await message.reply(sns_guide)
+        
+    except Exception as e:
+        await message.reply(f"❌ **SNS文章再生成エラー**\n\n詳細: {str(e)}")
+
 # Botを起動
-client_discord.run(DISCORD_BOT_TOKEN)
+bot.run(DISCORD_BOT_TOKEN)
