@@ -1,0 +1,28 @@
+# APIキーなどの機密情報
+.env
+
+# システムファイル
+.DS_Store
+.obsidian/
+.windsurf/
+
+# 個人的なメモファイル（必要に応じて調整）
+obsidian/
+てきすと.txt
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# 一時ファイル
+*.tmp
+*.log
