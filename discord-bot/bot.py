@@ -137,7 +137,10 @@ async def on_message(message):
                         # OpenAI Whisper APIで文字起こし
                         transcription = client_openai.audio.transcriptions.create(
                             model="whisper-1",
-                            file=("voice_memo.ogg", audio_data, "audio/ogg")
+                            file=("voice_memo.ogg", audio_data, "audio/ogg"),
+                            language="ja",
+                            prompt="音声メモ、思考メモ、アイデア、学び、気づき、Twitter投稿、SNS、プログラミング、技術、ビジネス、日常の振り返り、TODO、タスク、メモ",
+                            temperature=0.0
                         )
                         raw_text = transcription.text
 
@@ -315,32 +318,24 @@ async def convert_to_sns_post(content):
             messages=[
                 {
                     "role": "system",
-                    "content": """あなたはSNS投稿作成の専門家です。
-                    音声メモや思考メモをTwitter投稿に最適化してください。
-                    
-                    ルール：
-                    1. 280文字以内で収める
-                    2. 結論から書く
-                    3. 抽象的な表現は避け、具体的に表現する
-                    4. 内容が濃い場合はPREP法（結論→理由→具体例→結論）を使う
-                    5. なるべく言い切りの表現を使う
-                    6. 同じ単語の繰り返しを避け、類義語や言い換えを積極的に使う
-                    7. 絵文字は全体で1-2個程度に抑える
-                    8. 上から目線ではなく、周りの人を鼓舞するような表現を使う
-                    9. #記号は絶対に使わない
-                    10. ハッシュタグ（#〇〇）は一切付けない
-                    11. 日本語で自然な表現にする
-                    
-                    投稿形式：
-                    [メイン文章のみ（#記号なし）]"""
+                    "content": """以下の文字起こしテキストを、X（旧Twitter）向けの短い要約に変換してください。
+
+**必須条件:**
+* **文字制限:** 最大140文字（目標135文字）。厳守してください。
+* **構造:** 結論を冒頭に。PREP法を意識し、簡潔に理由や具体例を続けます。
+* **口調:** 親しみやすく、ポジティブな敬体・常体ミックス。上から目線なし。
+* **表現:** 過度な賛美や驚きの言葉は避け、気づきや学びを中心に記述。
+* **ハッシュタグ:** 使用禁止。
+
+文字数を厳密に守って、簡潔で価値のある投稿を作成してください。"""
                 },
                 {
                     "role": "user",
-                    "content": f"以下の内容をTwitter投稿用に変換してください：\n\n{content}"
+                    "content": f"**文字起こし:**\n{content}"
                 }
             ],
-            max_tokens=300,
-            temperature=0.7
+            max_tokens=200,
+            temperature=0.3
         )
         
         return response.choices[0].message.content.strip()
