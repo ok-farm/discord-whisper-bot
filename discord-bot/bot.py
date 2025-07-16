@@ -94,20 +94,25 @@ async def on_message(message):
             # Obsidianに保存（関連ノートも含める）
             saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes, sns_post)
 
-            # 結果をDiscordに返信（シンプルなテキスト形式）
-            reply_text = f"✅ テキスト要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
-            
+            # 1つ目: 処理完了情報
+            info_text = f"✅ テキスト要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
             if related_notes:
-                reply_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}\n\n"
+                info_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}"
             
-            reply_text += f"📱 **SNS投稿用**:\n```\n{sns_post}\n```\n\n"
-            reply_text += f"**元のテキスト:**\n```\n{raw_text}\n```\n\n**AIによる要約・整形:**\n```\n{summarized_text}\n```"
+            # 2つ目: SNS投稿用テキスト（コピー用）
+            sns_text = sns_post
             
-            # SNS投稿ガイドを追加
-            sns_guide = create_sns_guide(sns_post, saved_filename)
+            # 3つ目: 元のテキスト
+            original_text = raw_text
             
-            await message.reply(reply_text)
-            await message.reply(sns_guide)
+            # Twitter投稿ボタン
+            twitter_view = TwitterOnlyView()
+            
+            # 4つのチャットに分割して送信
+            await message.reply(info_text)
+            await message.reply(sns_text, view=CopyButtonView(sns_text))
+            await message.reply(original_text, view=CopyButtonView(original_text))
+            await message.reply("投稿", view=twitter_view)
             
         except Exception as e:
             print(f"テキスト処理でエラーが発生しました: {e}")
@@ -151,20 +156,25 @@ async def on_message(message):
                         # Obsidianに保存（関連ノートも含める）
                         saved_filename = save_to_obsidian(raw_text, summarized_text, related_notes, sns_post)
 
-                        # 結果をDiscordに返信（シンプルなテキスト形式）
-                        reply_text = f"✅ 文字起こし・要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
-                        
+                        # 1つ目: 処理完了情報
+                        info_text = f"✅ 文字起こし・要約・関連性分析・SNS変換が完了し、Obsidianに保存しました。\nファイル名: {saved_filename}\n\n"
                         if related_notes:
-                            reply_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}\n\n"
+                            info_text += f"🔗 **関連ノート発見**: {', '.join(related_notes)}"
                         
-                        reply_text += f"📱 **SNS投稿用**:\n```\n{sns_post}\n```\n\n"
-                        reply_text += f"**元の文字起こし:**\n```\n{raw_text}\n```\n\n**AIによる要約・整形:**\n```\n{summarized_text}\n```"
+                        # 2つ目: SNS投稿用テキスト（コピー用）
+                        sns_text = sns_post
                         
-                        # SNS投稿ガイドを追加
-                        sns_guide = create_sns_guide(sns_post, saved_filename)
+                        # 3つ目: 元の文字起こし
+                        original_text = raw_text
                         
-                        await message.reply(reply_text)
-                        await message.reply(sns_guide)
+                        # Twitter投稿ボタン
+                        twitter_view = TwitterOnlyView()
+                        
+                        # 4つのチャットに分割して送信
+                        await message.reply(info_text)
+                        await message.reply(sns_text, view=CopyButtonView(sns_text))
+                        await message.reply(original_text, view=CopyButtonView(original_text))
+                        await message.reply("投稿", view=twitter_view)
                     else:
                         await message.reply("❌ 音声ファイルのダウンロードに失敗しました。")
 
@@ -386,27 +396,94 @@ def save_to_obsidian(raw_text, summarized_text=None, related_notes=None, sns_pos
         print(f"ファイルへの書き込み中にエラーが発生しました: {e}")
         return None
 
-def create_sns_guide(sns_post, filename):
-    """SNS投稿ガイドを作成する関数（シンプルなテキスト形式）"""
-    guide = f"""
-🎉 **SNS投稿ガイド**
+# create_sns_guide_text関数を削除（不要になったため）
 
-📱 **簡単3ステップでTwitter投稿！**
+# コピー用UIボタンのViewクラス
+class CopyButtonView(discord.ui.View):
+    def __init__(self, text_content):
+        super().__init__(timeout=600)  # 10分でタイムアウト
+        self.text_content = text_content
+        self.copied = False
+    
+    @discord.ui.button(label='📋 コピー', style=discord.ButtonStyle.primary, emoji='📝')
+    async def copy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """テキストコピーボタンが押されたときの処理"""
+        try:
+            # ボタンの状態を変更（チャット投稿なし）
+            self.copied = True
+            button.label = "✅ コピー完了"
+            button.style = discord.ButtonStyle.success
+            
+            # テキストをクリップボードにコピー
+            import subprocess
+            import platform
+            
+            if platform.system() == "Darwin":  # macOS
+                process = subprocess.Popen(
+                    ['pbcopy'], 
+                    stdin=subprocess.PIPE, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                process.communicate(input=self.text_content.encode())
+            elif platform.system() == "Linux":
+                process = subprocess.Popen(
+                    ['xclip', '-selection', 'clipboard'], 
+                    stdin=subprocess.PIPE, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                process.communicate(input=self.text_content.encode())
+            elif platform.system() == "Windows":
+                process = subprocess.Popen(
+                    ['clip'], 
+                    stdin=subprocess.PIPE, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                process.communicate(input=self.text_content.encode())
+            
+            # ボタンの状態のみ更新（新しいメッセージは投稿しない）
+            await interaction.response.edit_message(view=self)
+            
+        except Exception as e:
+            await interaction.response.send_message(f"❌ コピーエラー: {str(e)}", ephemeral=True)
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        for item in self.children:
+            item.disabled = True
+        
+        # メッセージを更新（可能であれば）
+        try:
+            await self.message.edit(view=self)
+        except:
+            pass
 
-**ステップ1**: 上記のSNS投稿用テキストをコピー
-　　　　　　 （テキストを長押しして選択→コピー）
-
-**ステップ2**: 下のリンクをタップしてTwitterを開く
-　　　　　　 👉 https://twitter.com/intent/tweet
-
-**ステップ3**: Twitterの投稿欄に貼り付けして投稿！
-
-🔄 **文章を変えたい場合**
-「再生成」と送信すると新しいSNS文章を作成します
-
-💡 **ヒント**: スマホならリンクをタップするだけでTwitterアプリが開きます
-"""
-    return guide
+# Twitter投稿用UIボタンのViewクラス
+class TwitterOnlyView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)  # 10分でタイムアウト
+        
+        # Twitter投稿ボタンを追加
+        twitter_button = discord.ui.Button(
+            label='🐦 Twitterで投稿',
+            style=discord.ButtonStyle.link,
+            url="https://twitter.com/intent/tweet",
+            emoji='🌐'
+        )
+        self.add_item(twitter_button)
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        for item in self.children:
+            item.disabled = True
+        
+        # メッセージを更新（可能であれば）
+        try:
+            await self.message.edit(view=self)
+        except:
+            pass
 
 async def handle_regenerate_command(message):
     """SNS文章再生成コマンドを処理する関数"""
@@ -437,10 +514,10 @@ async def handle_regenerate_command(message):
         
         # 結果を返信
         reply_text = f"✅ **SNS文章を再生成しました！**\n\n📱 **新しいSNS投稿用**:\n```\n{new_sns_post}\n```"
-        sns_guide = create_sns_guide(new_sns_post, filename)
+        sns_view = SnsGuideView(new_sns_post, filename)
         
         await message.reply(reply_text)
-        await message.reply(sns_guide)
+        await message.reply("​", view=sns_view)  # 不可視文字でボタンのみ表示
         
     except Exception as e:
         await message.reply(f"❌ **SNS文章再生成エラー**\n\n詳細: {str(e)}")
