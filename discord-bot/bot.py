@@ -13,7 +13,7 @@ load_dotenv()
 # --- 設定読み込み ---
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OBSIDIAN_VAULT_FOLDER_PATH = os.getenv("OBSIDIAN_VAULT_FOLDER_PATH")
+OBSIDIAN_VAULT_FOLDER_PATH = os.getenv("OBSIDIAN_VAULT_FOLDER_PATH", "/tmp/obsidian")
 # --------------------
 
 # OpenAIクライアントの初期化
@@ -357,6 +357,10 @@ async def convert_to_sns_post(content):
 def save_to_obsidian(raw_text, summarized_text=None, related_notes=None, sns_post=None):
     """指定されたフォルダに、現在日時のファイル名でテキストを保存する関数"""
     try:
+        # Obsidianフォルダが存在しない場合は作成
+        if not os.path.exists(OBSIDIAN_VAULT_FOLDER_PATH):
+            os.makedirs(OBSIDIAN_VAULT_FOLDER_PATH)
+        
         # 現在の日時を取得
         now = datetime.datetime.now()
         
