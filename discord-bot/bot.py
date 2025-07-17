@@ -40,10 +40,20 @@ async def on_message(message):
     # Bot自身のメッセージは無視する
     if message.author == bot.user:
         return
+    
+    # 指定されたチャンネルIDでのみ機能するように制限
+    ALLOWED_CHANNEL_ID = 1070657253050421353
+    if message.channel.id != ALLOWED_CHANNEL_ID:
+        return
 
     # テキストメッセージに反応する機能を追加（デバッグ用）
     if message.content.lower() == "ping":
         await message.reply("pong! Botは正常に動作しています。")
+        return
+    
+    # チャンネル情報確認コマンド
+    if message.content.lower() == "channel_info":
+        await message.reply(f"チャンネル名: {message.channel.name}\nチャンネルID: {message.channel.id}")
         return
     
     # 再生成コマンド
